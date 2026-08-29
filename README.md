@@ -43,7 +43,7 @@ Part of the [ha-parcel-integrations](https://github.com/ha-parcel-integrations) 
 
 ## Requirements
 
-- Home Assistant 2024.7 or newer
+- Home Assistant 2024.12 or newer
 - A Canpar parcel and its tracking code (from the shipping
   confirmation email or the missed-delivery card) — no account needed
 
@@ -93,6 +93,8 @@ Standard HA removal applies: **Settings → Devices & Services → Canpar → �
 | `sensor.canpar_next_delivery` | Earliest expected delivery moment across all active parcels |
 | `sensor.canpar_delivered_parcels` | Recently delivered parcels (see the retention option) |
 | `sensor.canpar_last_successful_update` | Diagnostic: when Canpar was last polled successfully |
+| `calendar.canpar_deliveries` | Expected delivery dates for active parcels, read-only, no extra API calls |
+| `button.canpar_refresh` | Forces an immediate poll without waiting for the next scheduled interval |
 
 A delivered parcel moves from its per-parcel sensor to the delivered sensor automatically.
 
