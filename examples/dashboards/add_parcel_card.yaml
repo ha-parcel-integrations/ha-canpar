@@ -28,8 +28,6 @@ canpar_track_new_parcel:
     - action: canpar.track_parcel
       data:
         tracking_code: "{{ states('input_text.canpar_new_parcel') | trim }}"
-        
-        
     - action: input_text.set_value
       target:
         entity_id: input_text.canpar_new_parcel
