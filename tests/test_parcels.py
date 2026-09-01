@@ -134,6 +134,21 @@ def test_known_time_shift_does_not_warn(caplog):
     assert "time_shift" not in caplog.text
 
 
+def test_time_shift_within_plausible_range_does_not_warn(caplog):
+    """7 (observed since the 3-only baseline) is still a small positive int."""
+    raw = active_sample()
+    raw["events"][0]["time_shift"] = 7
+    normalize_parcel(raw)
+    assert "time_shift" not in caplog.text
+
+
+def test_time_shift_outside_plausible_range_still_warns(caplog):
+    raw = active_sample()
+    raw["events"][0]["time_shift"] = -1
+    normalize_parcel(raw)
+    assert "time_shift=-1" in caplog.text
+
+
 def test_populated_sensitive_result_field_warns_without_value(caplog):
     raw = delivered_sample()
     raw["signature_url"] = "https://example.invalid/secret-signature.png"
@@ -162,6 +177,34 @@ def test_unrecognised_address_key_warns_without_value(caplog):
 def test_known_address_shape_does_not_warn(caplog):
     normalize_parcel(active_sample())
     assert "address" not in caplog.text.lower()
+
+
+def test_address_bookkeeping_and_residential_keys_are_known(caplog):
+    """address_id/id/inserted_on/updated_on/residential are now known keys."""
+    raw = active_sample()
+    raw["events"][0]["address"] = {
+        "city": "Test City",
+        "province": "ON",
+        "address_id": 123,
+        "id": 456,
+        "inserted_on": "2026-01-01T00:00:00",
+        "updated_on": "2026-01-01T00:00:00",
+        "residential": True,
+    }
+    normalize_parcel(raw)
+    assert "unrecognised field" not in caplog.text
+
+
+def test_residential_flag_is_surfaced_in_raw_events():
+    raw = active_sample()
+    raw["events"][0]["address"] = {"city": "Test City", "residential": True}
+    parcel = normalize_parcel(raw)
+    assert parcel["raw"]["events"][0]["residential"] is True
+
+
+def test_residential_flag_absent_is_omitted_from_raw_events():
+    parcel = normalize_parcel(active_sample())
+    assert "residential" not in parcel["raw"]["events"][0]
 
 
 # ---------------------------------------------------------------------------

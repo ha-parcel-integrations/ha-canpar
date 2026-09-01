@@ -73,10 +73,17 @@ _warned: set[str] = set()
 
 # events[].address fields we expect on every observed shape. A field added or
 # removed is a shape change worth a warning; values are never logged.
+#
+# ``address_id``, ``id``, ``inserted_on`` and ``updated_on`` are Canpar's own
+# record bookkeeping (internal ids and audit timestamps) — confirmed present,
+# never useful to a HA user, so just known-and-ignored.
+# ``residential`` is a genuine non-PII signal (unlike the surrounding address
+# fields, which stay redacted); it is surfaced in :func:`safe_raw_payload`.
 _KNOWN_ADDRESS_KEYS = frozenset({
     "name", "address_line_1", "address_line_2", "address_line_3",
     "attention", "phone", "extension", "email", "city", "province",
     "postal_code", "country",
+    "address_id", "id", "inserted_on", "updated_on", "residential",
 })
 
 # Sensitive fields that were null/absent in the only capture this integration
@@ -116,9 +123,22 @@ def _warn_delivered_mismatch(raw_delivered: Any, status: ParcelStatus) -> None:
     )
 
 
+# time_shift's meaning is still unconfirmed (not a UTC offset — see
+# canpar_local_timestamp / CLAUDE.md), but every value observed so far (3 on
+# an Ontario/Quebec route, 7 since) is a small positive integer, consistent
+# with a bounded regional/zone code across Canada's handful of time zones
+# rather than an open-ended one. Validate the *shape* (a plausible small
+# integer) instead of hard-coding each newly observed value as its own
+# enum member — that would never stop growing and would tell us nothing
+# past "it happened again". Anything outside this range is still a genuine
+# surprise worth a warning.
+_TIME_SHIFT_MIN = 0
+_TIME_SHIFT_MAX = 12
+
+
 def _warn_time_shift(value: Any) -> None:
-    """Warn once for a ``time_shift`` other than the only value seen so far (``3``)."""
-    if isinstance(value, int) and value == 3:
+    """Warn once for a ``time_shift`` outside the plausible small-integer range."""
+    if isinstance(value, int) and _TIME_SHIFT_MIN <= value <= _TIME_SHIFT_MAX:
         return
     _warn_once(
         "time-shift",
@@ -281,7 +301,7 @@ def safe_raw_payload(raw: dict) -> dict:
     for event in raw.get("events") or []:
         if not isinstance(event, dict):
             continue
-        safe_events.append({
+        safe_event = {
             key: event[key]
             for key in (
                 "code",
@@ -291,7 +311,13 @@ def safe_raw_payload(raw: dict) -> dict:
                 "time_shift",
             )
             if key in event
-        })
+        }
+        # ``residential`` is the one events[].address field that is not PII —
+        # everything else there (name, street, contact info) stays redacted.
+        address = event.get("address")
+        if isinstance(address, dict) and "residential" in address:
+            safe_event["residential"] = address["residential"]
+        safe_events.append(safe_event)
     return {
         key: raw[key]
         for key in (
