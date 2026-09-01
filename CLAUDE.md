@@ -49,12 +49,6 @@ you act in one of these areas:
 - Recipient addresses, delivery comments, employee/route IDs, signatures and
   image URLs are PII and are redacted from diagnostics and entity data.
 - API mechanics live in `carrier-research/canpar/api/`.
->
-> **API mechanics go in this carrier's own directory in the private
-> `carrier-research/<slug>/api/`, NOT here and not in a local `docs/api/`** — the
-> endpoint(s) and what keys them, auth flow, rate limits, response content type,
-> the "unknown code" vs error signalling, the status vocabulary and its
-> `ParcelStatus` mapping, and the timestamp format. See CONVENTIONS.md.
 
 ## Options and reloads
 
