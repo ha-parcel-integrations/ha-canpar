@@ -30,10 +30,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Observed codes start with ``D`` and have 21 characters, but other families
-# are unconfirmed, so validation deliberately remains broad.
-_TRACKING_CODE_RE = re.compile(r"^[A-Z0-9]{6,30}$")
-
 
 def normalize_tracking_code(value: str) -> str:
     """Return the tracking code upper-cased with separators stripped.
@@ -46,8 +42,8 @@ def normalize_tracking_code(value: str) -> str:
 
 
 def valid_tracking_code(value: str) -> bool:
-    """Whether ``value`` looks like a Canpar tracking code."""
-    return bool(_TRACKING_CODE_RE.match(value))
+    """Accept every non-empty code; other Canpar number families beyond the one observed shape are unconfirmed."""
+    return bool(value)
 
 
 def _current_parcels(entry: ConfigEntry) -> list[dict[str, str]]:

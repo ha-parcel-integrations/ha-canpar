@@ -28,7 +28,8 @@ async def _step(hass, entry, name):
 def test_tracking_code_helpers():
     assert normalize_tracking_code("example 123-456") == "EXAMPLE123456"
     assert valid_tracking_code("EXAMPLE123456")
-    assert not valid_tracking_code("ABC")
+    assert valid_tracking_code("ABC")
+    assert not valid_tracking_code("")
 
 
 async def test_parcel_list(hass):
