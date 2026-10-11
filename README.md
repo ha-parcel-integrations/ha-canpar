@@ -120,11 +120,12 @@ The `status` field is the carrier-agnostic enum shared by the whole integration 
 
 | Status | Meaning |
 |---|---|
-| `in_transit` | In the sorting network |
+| `in_transit` | In the sorting network, including a handoff to a local delivery partner, a change of address and a weather delay |
 | `out_for_delivery` | With the courier today |
 | `at_pickup_point` | Waiting for you at a pickup location |
 | `delivered` | Delivered |
-| `problem` | Canpar reports an exception |
+| `returning` | Canpar has returned the parcel to the sender; its expected delivery date is dropped |
+| `problem` | Canpar reports an exception: nobody home, the address could not be found, the parcel was sorted to the wrong terminal or is delayed at a facility |
 | `unknown` | Not yet scanned, or a status we have not mapped yet |
 
 The carrier's own human-readable text is always available as `raw_status`.

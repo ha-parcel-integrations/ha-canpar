@@ -53,6 +53,15 @@ _STATUS_MAP: dict[str, ParcelStatus] = {
     "NH": ParcelStatus.PROBLEM,
     "DEL": ParcelStatus.DELIVERED,
     "NSR": ParcelStatus.DELIVERED,
+    "DPT": ParcelStatus.IN_TRANSIT,
+    "INO": ParcelStatus.IN_TRANSIT,   # handed to a local partner to deliver
+    "COA": ParcelStatus.IN_TRANSIT,
+    "XC": ParcelStatus.IN_TRANSIT,
+    "WXX": ParcelStatus.IN_TRANSIT,   # weather delay, Canpar says it is moving
+    "HLD": ParcelStatus.PROBLEM,      # delayed at a facility; sometimes the last scan
+    "MIS": ParcelStatus.PROBLEM,      # sorted to the wrong terminal
+    "NL": ParcelStatus.PROBLEM,       # "Can't find the address": a failed attempt, not a country code
+    "RTN": ParcelStatus.RETURNING,
 }
 
 # The public tracking UI exposes this numeric summary alongside the latest
@@ -435,7 +444,13 @@ def normalize_parcel(raw: dict, *, include_history: bool = False) -> dict:
         ) or None
 
     delivered_at = canpar_local_timestamp(newest_event.get("local_date_time")) if delivered else None
-    planned_from, planned_to = (None, None) if delivered else canpar_delivery_window(raw.get("estimated_delivery_date"))
+    # A returned parcel is no longer expected at the recipient, so its ETA must
+    # not keep a "delivery" on the calendar and in the next-delivery sensor.
+    planned_from, planned_to = (
+        (None, None)
+        if delivered or status is ParcelStatus.RETURNING
+        else canpar_delivery_window(raw.get("estimated_delivery_date"))
+    )
 
     return {
         "carrier": "Canpar",

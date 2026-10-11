@@ -33,7 +33,7 @@ from custom_components.canpar.parcels import (
     to_iso_timestamp,
 )
 
-from .payloads import active_sample, delivered_sample, pickup_sample
+from .payloads import active_sample, delivered_sample, event, pickup_sample
 
 # ---------------------------------------------------------------------------
 # map_parcel_status / map_event_status
@@ -51,6 +51,16 @@ from .payloads import active_sample, delivered_sample, pickup_sample
         ("NH", ParcelStatus.PROBLEM),
         ("DEL", ParcelStatus.DELIVERED),
         ("NSR", ParcelStatus.DELIVERED),
+        ("DPT", ParcelStatus.IN_TRANSIT),
+        ("INO", ParcelStatus.IN_TRANSIT),
+        ("COA", ParcelStatus.IN_TRANSIT),
+        ("XC ", ParcelStatus.IN_TRANSIT),
+        ("WXX", ParcelStatus.IN_TRANSIT),
+        ("HLD", ParcelStatus.PROBLEM),
+        ("MIS", ParcelStatus.PROBLEM),
+        ("NL", ParcelStatus.PROBLEM),
+        ("NL ", ParcelStatus.PROBLEM),
+        ("RTN", ParcelStatus.RETURNING),
     ],
 )
 def test_map_parcel_status_known(code, expected):
@@ -361,6 +371,43 @@ def test_normalize_active_parcel_has_window():
     assert parcel["delivered"] is False
     assert parcel["planned_from"] == "2026-01-01T00:00:00"
     assert parcel["planned_to"] == "2026-01-01T23:59:59"
+
+
+def test_normalize_returned_parcel_is_returning_and_drops_its_eta(caplog):
+    raw = active_sample()
+    raw["events"] = [
+        event("RTN", "20260102 090000", "Returned to Sender"),
+        *raw["events"],
+    ]
+    raw["statusCode"] = "RTN"
+    parcel = normalize_parcel(raw, include_history=True)
+    assert parcel["status"] == ParcelStatus.RETURNING
+    assert parcel["raw_status"] == "RTN"
+    assert parcel["delivered"] is False
+    assert parcel["pickup"] is False
+    assert parcel["planned_from"] is None
+    assert parcel["planned_to"] is None
+    assert parcel["history"][-1]["status"] == ParcelStatus.RETURNING
+    assert "Unrecognised Canpar status" not in caplog.text
+
+
+@pytest.mark.parametrize("code", ["HLD", "MIS", "NL ", "NL"])
+def test_normalize_exception_codes_are_a_problem_and_keep_the_eta(code, caplog):
+    raw = active_sample()
+    raw["events"] = [event(code, "20260101 100000"), *raw["events"]]
+    parcel = normalize_parcel(raw)
+    assert parcel["status"] == ParcelStatus.PROBLEM
+    assert parcel["raw_status"] == code.strip()
+    assert parcel["planned_to"] == "2026-01-01T23:59:59"
+    assert "Unrecognised Canpar status" not in caplog.text
+
+
+def test_a_later_scan_after_a_return_wins():
+    """RTN is the newest scan only until the next one: movement or delivery
+    after it is reported, not the earlier return."""
+    raw = delivered_sample()
+    raw["events"].append(event("RTN", "20251231 100000", "Returned to Sender"))
+    assert normalize_parcel(raw)["status"] == ParcelStatus.DELIVERED
 
 
 def test_normalize_pickup_parcel():

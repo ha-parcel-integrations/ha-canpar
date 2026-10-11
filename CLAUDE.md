@@ -43,9 +43,19 @@ This repo follows it exactly.
 - Keyless, code-based tracking uses Canpar's JSON POST endpoint; an empty
   `result` is a normal not-found response, while a populated `error` is an
   invalid-input/API error.
-- Map trimmed event codes, not the numeric parcel `status`: `PIC`/`ARR`/`SRT`
-  are in transit, `WC` is out for delivery, `DRP` is pickup, `NH` is a problem,
-  and `DEL`/`NSR` are delivered.
+- Map trimmed event codes (Canpar pads some, e.g. `WC `, `XC `), not the numeric
+  parcel `status`: `PIC`/`ARR`/`SRT`/`DPT`/`COA`/`INO`/`XC`/`WXX` are in transit,
+  `WC` is out for delivery, `DRP` is pickup, `NH`/`NL`/`HLD`/`MIS` are a
+  problem, `RTN` is returning, and `DEL`/`NSR` are delivered. The status is the
+  newest scan's only, so a later scan after `RTN` or `HLD` replaces it.
+  - **`NL` is "Can't Find the Address-Checking Again!"** — a failed delivery
+    attempt like `NH`. It is not a country code and not null; keep it a plain
+    string in the map.
+  - `HLD` ("Delayed at Facility") is a `problem` on purpose: it is sometimes the
+    last scan a parcel ever gets, and `in_transit` would hide that.
+  - `RTN` is the only route to `returning`, and a returning parcel drops
+    `planned_from`/`planned_to` so a returned parcel never shows an expected
+    delivery on the calendar or in the next-delivery sensor.
 - Canpar supplies offset-less local timestamps and `time_shift` is unresolved,
   so event history, `delivered_at` and the calendar publish naive local ISO
   wall times — never a UTC or guessed-timezone offset. `planned_from`/
