@@ -1,4 +1,5 @@
 """Tests for the Canpar config and options flow."""
+
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.canpar.config_flow import (
@@ -16,13 +17,17 @@ from custom_components.canpar.const import (
 
 
 def _hub(parcels):
-    return MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, options={CONF_PARCELS: parcels})
+    return MockConfigEntry(
+        domain=DOMAIN, unique_id=DOMAIN, options={CONF_PARCELS: parcels}
+    )
 
 
 async def _step(hass, entry, name):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] == "menu"
-    return await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": name})
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": name}
+    )
 
 
 def test_tracking_code_helpers():
@@ -36,7 +41,9 @@ async def test_parcel_list(hass):
     entry = _hub([{CONF_TRACKING_CODE: "EXAMPLE111111"}])
     entry.add_to_hass(hass)
     result = await _step(hass, entry, "parcels")
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"tracking_codes": ["example222222", "EXAMPLE222222"]})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"tracking_codes": ["example222222", "EXAMPLE222222"]}
+    )
     assert result["data"][CONF_PARCELS] == [{CONF_TRACKING_CODE: "EXAMPLE222222"}]
 
 
@@ -54,5 +61,12 @@ async def test_settings_keep_parcels(hass):
     entry = _hub([{CONF_TRACKING_CODE: "EXAMPLE111111"}])
     entry.add_to_hass(hass)
     result = await _step(hass, entry, "settings")
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_DELIVERED_FILTER_TYPE: "parcels", CONF_DELIVERED_FILTER_AMOUNT: 5, CONF_INCLUDE_HISTORY: True})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DELIVERED_FILTER_TYPE: "parcels",
+            CONF_DELIVERED_FILTER_AMOUNT: 5,
+            CONF_INCLUDE_HISTORY: True,
+        },
+    )
     assert result["data"][CONF_PARCELS] == [{CONF_TRACKING_CODE: "EXAMPLE111111"}]

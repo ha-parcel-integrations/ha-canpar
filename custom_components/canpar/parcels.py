@@ -12,10 +12,11 @@ timestamp parsing, the history builder, the sort contract, the delivered
 filter, the one-shot warning for unmapped statuses — is suite-wide machinery
 and should be left alone.
 """
+
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -54,13 +55,13 @@ _STATUS_MAP: dict[str, ParcelStatus] = {
     "DEL": ParcelStatus.DELIVERED,
     "NSR": ParcelStatus.DELIVERED,
     "DPT": ParcelStatus.IN_TRANSIT,
-    "INO": ParcelStatus.IN_TRANSIT,   # handed to a local partner to deliver
+    "INO": ParcelStatus.IN_TRANSIT,  # handed to a local partner to deliver
     "COA": ParcelStatus.IN_TRANSIT,
     "XC": ParcelStatus.IN_TRANSIT,
-    "WXX": ParcelStatus.IN_TRANSIT,   # weather delay, Canpar says it is moving
-    "HLD": ParcelStatus.PROBLEM,      # delayed at a facility; sometimes the last scan
-    "MIS": ParcelStatus.PROBLEM,      # sorted to the wrong terminal
-    "NL": ParcelStatus.PROBLEM,       # "Can't find the address": a failed attempt, not a country code
+    "WXX": ParcelStatus.IN_TRANSIT,  # weather delay, Canpar says it is moving
+    "HLD": ParcelStatus.PROBLEM,  # delayed at a facility; sometimes the last scan
+    "MIS": ParcelStatus.PROBLEM,  # sorted to the wrong terminal
+    "NL": ParcelStatus.PROBLEM,  # "Can't find the address": a failed attempt, not a country code
     "RTN": ParcelStatus.RETURNING,
 }
 
@@ -88,18 +89,38 @@ _warned: set[str] = set()
 # never useful to a HA user, so just known-and-ignored.
 # ``residential`` is a genuine non-PII signal (unlike the surrounding address
 # fields, which stay redacted); it is surfaced in :func:`safe_raw_payload`.
-_KNOWN_ADDRESS_KEYS = frozenset({
-    "name", "address_line_1", "address_line_2", "address_line_3",
-    "attention", "phone", "extension", "email", "city", "province",
-    "postal_code", "country",
-    "address_id", "id", "inserted_on", "updated_on", "residential",
-})
+_KNOWN_ADDRESS_KEYS = frozenset(
+    {
+        "name",
+        "address_line_1",
+        "address_line_2",
+        "address_line_3",
+        "attention",
+        "phone",
+        "extension",
+        "email",
+        "city",
+        "province",
+        "postal_code",
+        "country",
+        "address_id",
+        "id",
+        "inserted_on",
+        "updated_on",
+        "residential",
+    }
+)
 
 # Sensitive fields that were null/absent in the only capture this integration
 # is built from. A populated one is new evidence, worth a warning — but never
 # its value, since these fields can carry a delivery photo or a name.
 _SENSITIVE_EVENT_FIELDS = ("image_url",)
-_SENSITIVE_RESULT_FIELDS = ("signature_url", "signed_by", "signature", "consignee_address")
+_SENSITIVE_RESULT_FIELDS = (
+    "signature_url",
+    "signed_by",
+    "signature",
+    "consignee_address",
+)
 
 
 def _warn_once(key: str, message: str, *args: Any) -> None:
@@ -252,11 +273,11 @@ def parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(str(value))
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -272,7 +293,7 @@ def to_iso_timestamp(value: Any) -> str | None:
         return None
     if isinstance(value, (int, float)):
         try:
-            return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+            return datetime.fromtimestamp(value / 1000, tz=UTC).isoformat()
         except (OverflowError, OSError, ValueError):
             return None
     return str(value)
@@ -430,20 +451,37 @@ def normalize_parcel(raw: dict, *, include_history: bool = False) -> dict:
     for field in _SENSITIVE_RESULT_FIELDS:
         if raw.get(field):
             _warn_sensitive_field(field)
-    status_code = str(newest_event.get("code") or raw.get("statusCode") or "").strip() or None
-    status = map_parcel_status(status_code) if status_code else map_summary_status(raw.get("status"))
+    status_code = (
+        str(newest_event.get("code") or raw.get("statusCode") or "").strip() or None
+    )
+    status = (
+        map_parcel_status(status_code)
+        if status_code
+        else map_summary_status(raw.get("status"))
+    )
     raw_delivered = raw.get("delivered")
-    if isinstance(raw_delivered, bool) and raw_delivered != (status is ParcelStatus.DELIVERED):
+    if isinstance(raw_delivered, bool) and raw_delivered != (
+        status is ParcelStatus.DELIVERED
+    ):
         _warn_delivered_mismatch(raw_delivered, status)
     delivered = raw_delivered is True and status is ParcelStatus.DELIVERED
     address = newest_event.get("address") or {}
     pickup_point = None
     if status is ParcelStatus.AT_PICKUP_POINT:
-        pickup_point = ", ".join(
-            str(value) for value in (address.get("city"), address.get("province")) if value
-        ) or None
+        pickup_point = (
+            ", ".join(
+                str(value)
+                for value in (address.get("city"), address.get("province"))
+                if value
+            )
+            or None
+        )
 
-    delivered_at = canpar_local_timestamp(newest_event.get("local_date_time")) if delivered else None
+    delivered_at = (
+        canpar_local_timestamp(newest_event.get("local_date_time"))
+        if delivered
+        else None
+    )
     # A returned parcel is no longer expected at the recipient, so its ETA must
     # not keep a "delivery" on the calendar and in the next-delivery sensor.
     planned_from, planned_to = (
@@ -504,14 +542,12 @@ def apply_delivered_filter(parcels: list[dict], entry: ConfigEntry) -> list[dict
     shows.
     """
     options = entry.options
-    filter_type = options.get(
-        CONF_DELIVERED_FILTER_TYPE, DEFAULT_DELIVERED_FILTER_TYPE
-    )
+    filter_type = options.get(CONF_DELIVERED_FILTER_TYPE, DEFAULT_DELIVERED_FILTER_TYPE)
     amount = int(
         options.get(CONF_DELIVERED_FILTER_AMOUNT, DEFAULT_DELIVERED_FILTER_AMOUNT)
     )
     if filter_type == "days":
-        cutoff = datetime.now(timezone.utc) - timedelta(days=amount)
+        cutoff = datetime.now(UTC) - timedelta(days=amount)
         return [
             parcel
             for parcel in parcels

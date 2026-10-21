@@ -1,4 +1,5 @@
 """Synthetic, privacy-safe Canpar payloads based on observed field shapes."""
+
 from __future__ import annotations
 
 ACTIVE_CODE = "D000000000000000000001"

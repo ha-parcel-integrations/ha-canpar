@@ -1,4 +1,5 @@
 """Tests for the Canpar refresh button."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.canpar.button import CanparRefreshButton

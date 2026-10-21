@@ -1,4 +1,5 @@
 """Client for Canpar's public, code-based tracking endpoint."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -42,14 +43,18 @@ class CanparApiClient:
             if response.status == 429:
                 retry_after_header = response.headers.get("Retry-After")
                 try:
-                    retry_after = float(retry_after_header) if retry_after_header else None
+                    retry_after = (
+                        float(retry_after_header) if retry_after_header else None
+                    )
                 except ValueError:
                     retry_after = None  # an HTTP-date, not seconds; let the caller's own backoff handle it
                 raise CanparApiError(
                     "HTTP 429", status_code=429, retry_after=retry_after
                 )
             if response.status != 200:
-                raise CanparApiError(f"HTTP {response.status}", status_code=response.status)
+                raise CanparApiError(
+                    f"HTTP {response.status}", status_code=response.status
+                )
             try:
                 payload = await response.json(content_type=None)
             except ValueError as err:
