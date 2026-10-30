@@ -112,6 +112,7 @@ Standard HA removal applies: **Settings → Devices & Services → Canpar → �
 | `sensor.canpar_incoming_parcels` | Number of active tracked parcels, full list under the `parcels` attribute |
 | `sensor.canpar_parcel_<code>` | One per tracked parcel; state is the canonical status, attributes carry the full normalised parcel |
 | `sensor.canpar_next_delivery` | Earliest expected delivery moment across all active parcels |
+| `sensor.canpar_awaiting_pickup` | Incoming parcels that are ready to collect at a pickup point |
 | `sensor.canpar_delivered_parcels` | Recently delivered parcels (see the retention option) |
 | `sensor.canpar_last_successful_update` | Diagnostic: when Canpar was last polled successfully |
 | `calendar.canpar_deliveries` | Expected delivery dates for active parcels, read-only, no extra API calls |
@@ -177,7 +178,7 @@ logger:
 ## Troubleshooting
 
 - **A parcel does not appear** — Canpar returned no result for the tracking code. Check the code and try again after the first carrier scan.
-- **A status logs "Unrecognised Canpar status"** — please [open an issue](https://github.com/ha-parcel-integrations/ha-canpar/issues/new) with the logged line so the mapping can be extended.
+- **A status logs "Unrecognised Canpar status"** — please [open an issue](https://github.com/ha-parcel-integrations/ha-canpar/issues/new?template=unrecognised_status.yml) with the logged line so the mapping can be extended.
 
 ## Related integrations
 
