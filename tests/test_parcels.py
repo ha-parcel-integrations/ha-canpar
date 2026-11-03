@@ -248,6 +248,10 @@ def test_canpar_time_helpers_preserve_local_wall_time():
     assert canpar_delivery_window("not-a-date") == (None, None)
 
 
+def test_format_dimensions_rounds_the_text():
+    assert format_dimensions(27.9, 5.1, 27.9)["text"] == "28 x 5 x 28 cm"
+
+
 def test_format_dimensions_needs_all_three_axes():
     assert format_dimensions(30, 20, 10) == {
         "length": 30,
