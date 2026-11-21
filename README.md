@@ -112,6 +112,7 @@ Standard HA removal applies: **Settings → Devices & Services → Canpar → �
 | `sensor.canpar_incoming_parcels` | Number of active tracked parcels, full list under the `parcels` attribute |
 | `sensor.canpar_parcel_<code>` | One per tracked parcel; state is the canonical status, attributes carry the full normalised parcel |
 | `sensor.canpar_next_delivery` | Earliest expected delivery moment across all active parcels |
+| `sensor.canpar_en_route_to_pickup_point` | Incoming pickup-point parcels that have not reached the point yet |
 | `sensor.canpar_awaiting_pickup` | Incoming parcels that are ready to collect at a pickup point |
 | `sensor.canpar_delivered_parcels` | Recently delivered parcels (see the retention option) |
 | `sensor.canpar_last_successful_update` | Diagnostic: when Canpar was last polled successfully |

@@ -22,6 +22,16 @@ async def test_diagnostics_redacts_and_counts(hass):
                 "trackingNumber": "EXAMPLE123456",
                 "recipient": "Jane Doe",
                 "deliveryAddress": {"city": "Rotterdam", "street": "Coolsingel 1"},
+                "consignee_address": {"address_line_1": "Test street"},
+                "events": [
+                    {
+                        "code": "WC",
+                        "address": {"name": "Jane Doe", "phone": "555"},
+                        "comment": "Leave at door",
+                        "employee_num": "E1",
+                        "route_num": "R1",
+                    }
+                ],
             },
         }
     ]
@@ -46,6 +56,13 @@ async def test_diagnostics_redacts_and_counts(hass):
     assert result["incoming"][0]["receiver"] == "**REDACTED**"
     assert result["incoming"][0]["raw"]["recipient"] == "**REDACTED**"
     assert result["incoming"][0]["raw"]["deliveryAddress"] == "**REDACTED**"
+    raw = result["incoming"][0]["raw"]
+    assert raw["consignee_address"] == "**REDACTED**"
+    assert raw["events"][0]["address"] == "**REDACTED**"
+    assert raw["events"][0]["comment"] == "**REDACTED**"
+    assert raw["events"][0]["employee_num"] == "**REDACTED**"
+    assert raw["events"][0]["route_num"] == "**REDACTED**"
+    assert raw["events"][0]["code"] == "WC"
     # non-identifying fields survive, or the diagnostics would be useless
     assert result["incoming"][0]["status"] == "out_for_delivery"
 

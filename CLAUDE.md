@@ -56,13 +56,24 @@ This repo follows it exactly.
   - `RTN` is the only route to `returning`, and a returning parcel drops
     `planned_from`/`planned_to` so a returned parcel never shows an expected
     delivery on the calendar or in the next-delivery sensor.
-- Canpar supplies offset-less local timestamps and `time_shift` is unresolved,
-  so event history, `delivered_at` and the calendar publish naive local ISO
-  wall times — never a UTC or guessed-timezone offset. `planned_from`/
-  `planned_to` expand a date-only ETA to local `00:00:00`–`23:59:59`, not a
-  carrier-confirmed window.
-- Recipient addresses, delivery comments, employee/route IDs, signatures and
-  image URLs are PII and are redacted from diagnostics and entity data.
+- Canpar supplies offset-less local timestamps and `time_shift` is unresolved.
+  Event history and `delivered_at` read them in Home Assistant's zone and
+  publish ISO with offset: Canpar spans several zones and no field says which
+  one an event is in, so the default zone is the best available.
+- The date-only ETA becomes `planned_from`/`planned_to` through the shared
+  `planned_window` helper: local `00:00:00`–`23:59:59` in Home Assistant's zone
+  (Canpar is multi-zone), not a carrier-confirmed window.
+- `delivered` is `status is DELIVERED` only; Canpar's own delivered flag is
+  never consulted beyond a one-shot warning when it disagrees with the status.
+- `pickup` is true once any event maps to `at_pickup_point` and stays true after
+  collection. `pickup_point` is always `None`: Canpar does not name the point
+  and an event address is a scan location. The
+  `en_route_to_pickup_point` sensor exists but reads 0 until Canpar shows a
+  pickup flag before arrival (pending): `pickup` is only known on arrival.
+- `raw` is the full carrier record, untrimmed, except signature and delivery
+  image links (`signature`, `signature_url`, `image_url`), which are left out.
+  Recipient addresses, comments, employee/route IDs and contact fields stay in
+  `raw` and are redacted from diagnostics.
 - API mechanics live in `carrier-research/canpar/api/`.
 
 ## Running tests

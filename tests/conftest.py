@@ -1,7 +1,9 @@
 """pytest configuration for the Canpar test suite."""
 
 import sys
+from zoneinfo import ZoneInfo
 
+from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.plugins import hass  # noqa: F401
 
@@ -47,3 +49,11 @@ if sys.platform == "win32":
     import homeassistant.helpers.aiohttp_client as _ha_aiohttp_client
 
     _ha_aiohttp_client.AsyncResolver = ThreadedResolver
+
+
+@pytest.fixture
+def toronto_zone():
+    previous = dt_util.get_default_time_zone()
+    dt_util.set_default_time_zone(ZoneInfo("America/Toronto"))
+    yield
+    dt_util.set_default_time_zone(previous)

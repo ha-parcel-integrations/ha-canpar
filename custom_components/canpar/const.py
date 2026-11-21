@@ -48,7 +48,7 @@ KNOWN_CAPABILITIES = frozenset(
 #   "pickup_point"       parcel["pickup_point"] is ever non-null (beyond the "pickup" bool)
 #   "url"                parcel["url"] is ever non-null
 #   "history"            the include_history option is implemented and does something
-CAPABILITIES = frozenset({"delivery_window", "pickup_point", "history"})
+CAPABILITIES = frozenset({"delivery_window", "history"})
 
 # Fields not confirmed yet — the docs site shows them as "awaiting data".
 # Move a field into the declaration above once a real parcel shows it.

@@ -6,7 +6,9 @@ rewrite per carrier) can be tested as plain functions.
 """
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
+from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -21,7 +23,7 @@ from custom_components.canpar.const import (
 from custom_components.canpar.parcels import (
     apply_delivered_filter,
     build_history,
-    canpar_delivery_window,
+    canpar_eta_date,
     canpar_local_timestamp,
     format_dimensions,
     map_event_status,
@@ -29,7 +31,6 @@ from custom_components.canpar.parcels import (
     map_summary_status,
     normalize_parcel,
     parse_iso,
-    safe_raw_payload,
     sort_parcels_by_ts,
     to_iso_timestamp,
 )
@@ -206,16 +207,11 @@ def test_address_bookkeeping_and_residential_keys_are_known(caplog):
     assert "unrecognised field" not in caplog.text
 
 
-def test_residential_flag_is_surfaced_in_raw_events():
+def test_residential_flag_stays_in_raw_event_address():
     raw = active_sample()
     raw["events"][0]["address"] = {"city": "Test City", "residential": True}
     parcel = normalize_parcel(raw)
-    assert parcel["raw"]["events"][0]["residential"] is True
-
-
-def test_residential_flag_absent_is_omitted_from_raw_events():
-    parcel = normalize_parcel(active_sample())
-    assert "residential" not in parcel["raw"]["events"][0]
+    assert parcel["raw"]["events"][0]["address"]["residential"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +234,18 @@ def test_to_iso_timestamp_converts_epoch_milliseconds():
     assert to_iso_timestamp(10**20) is None  # out of range -> None, never raises
 
 
-def test_canpar_time_helpers_preserve_local_wall_time():
-    assert canpar_local_timestamp("20260101 080000") == "2026-01-01T08:00:00"
+def test_canpar_timestamp_is_read_in_the_default_zone(toronto_zone):
+    assert canpar_local_timestamp("20990101 080000") == "2099-01-01T08:00:00-05:00"
+    assert canpar_local_timestamp("20990701 080000") == "2099-07-01T08:00:00-04:00"
+    dt_util.set_default_time_zone(ZoneInfo("America/Halifax"))
+    assert canpar_local_timestamp("20990101 080000") == "2099-01-01T08:00:00-04:00"
+
+
+def test_canpar_time_helpers_parse_garbage():
     assert canpar_local_timestamp("not-a-date") is None
-    assert canpar_delivery_window("20260101") == (
-        "2026-01-01T00:00:00",
-        "2026-01-01T23:59:59",
-    )
-    assert canpar_delivery_window("not-a-date") == (None, None)
+    assert canpar_eta_date("20260101") == "2026-01-01"
+    assert canpar_eta_date("not-a-date") is None
+    assert canpar_eta_date(None) is None
 
 
 def test_format_dimensions_rounds_the_text():
@@ -267,14 +267,14 @@ def test_format_dimensions_needs_all_three_axes():
 # ---------------------------------------------------------------------------
 
 
-def test_build_history_orders_canpar_events_oldest_to_newest():
+def test_build_history_orders_canpar_events_oldest_to_newest(toronto_zone):
     history = build_history(delivered_sample()["events"])
     assert [entry["raw_status"] for entry in history] == [
         "Sorting",
         "Out for delivery",
         "Delivered without signature",
     ]
-    assert history[-1]["timestamp"] == "2026-01-01T14:00:00"
+    assert history[-1]["timestamp"] == "2026-01-01T14:00:00-05:00"
     assert history[-1]["status"] == ParcelStatus.DELIVERED
 
 
@@ -336,15 +336,15 @@ def test_capabilities_match_what_normalize_parcel_actually_returns():
         assert delivered["dimensions"] is not None
     if "delivery_window" in CAPABILITIES:
         assert active["planned_from"] is not None or active["planned_to"] is not None
-    if "pickup_point" in CAPABILITIES:
-        assert pickup["pickup_point"] is not None
+    assert "pickup_point" not in CAPABILITIES
+    assert pickup["pickup_point"] is None
     if "url" in CAPABILITIES:
         assert delivered["url"] is not None
     if "history" in CAPABILITIES:
         assert with_history["history"] is not None
 
 
-def test_normalize_delivered_parcel():
+def test_normalize_delivered_parcel(toronto_zone):
     parcel = normalize_parcel(delivered_sample())
     assert parcel["carrier"] == "Canpar"
     assert parcel["barcode"] == "D000000000000000000002"
@@ -353,7 +353,7 @@ def test_normalize_delivered_parcel():
     assert parcel["status"] == ParcelStatus.DELIVERED
     assert parcel["raw_status"] == "NSR"
     assert parcel["delivered"] is True
-    assert parcel["delivered_at"] == "2026-01-01T14:00:00"
+    assert parcel["delivered_at"] == "2026-01-01T14:00:00-05:00"
     # A delivered parcel drops its ETA — the window is meaningless once it has
     # arrived.
     assert parcel["planned_from"] is None
@@ -374,8 +374,16 @@ def test_normalize_active_parcel_has_window():
     parcel = normalize_parcel(active_sample())
     assert parcel["status"] == ParcelStatus.OUT_FOR_DELIVERY
     assert parcel["delivered"] is False
-    assert parcel["planned_from"] == "2026-01-01T00:00:00"
-    assert parcel["planned_to"] == "2026-01-01T23:59:59"
+    start = datetime.fromisoformat(parcel["planned_from"])
+    end = datetime.fromisoformat(parcel["planned_to"])
+    assert (start.date().isoformat(), start.time().isoformat()) == (
+        "2026-01-01",
+        "00:00:00",
+    )
+    assert (end.date().isoformat(), end.time().isoformat()) == (
+        "2026-01-01",
+        "23:59:59",
+    )
 
 
 def test_normalize_returned_parcel_is_returning_and_drops_its_eta(caplog):
@@ -403,7 +411,7 @@ def test_normalize_exception_codes_are_a_problem_and_keep_the_eta(code, caplog):
     parcel = normalize_parcel(raw)
     assert parcel["status"] == ParcelStatus.PROBLEM
     assert parcel["raw_status"] == code.strip()
-    assert parcel["planned_to"] == "2026-01-01T23:59:59"
+    assert parcel["planned_to"].startswith("2026-01-01T23:59:59")
     assert "Unrecognised Canpar status" not in caplog.text
 
 
@@ -419,7 +427,7 @@ def test_normalize_pickup_parcel():
     parcel = normalize_parcel(pickup_sample())
     assert parcel["status"] == ParcelStatus.AT_PICKUP_POINT
     assert parcel["pickup"] is True
-    assert parcel["pickup_point"] == "Test City, ON"
+    assert parcel["pickup_point"] is None
 
 
 def test_normalize_pending_placeholder():
@@ -442,16 +450,21 @@ def test_normalize_blank_fields_become_none():
     assert parcel["receiver"] is None
 
 
-def test_normalize_exposes_only_safe_raw_payload():
+def test_normalize_raw_is_the_full_record_minus_signature_and_image_links():
     raw = active_sample()
-    raw["consignee_address"] = {"address_line_1": "Private street"}
-    raw["events"][0]["address"] = {"city": "Private city"}
-    raw["events"][0]["comment"] = "Private instruction"
+    raw["consignee_address"] = {"address_line_1": "Test street"}
+    raw["signature_url"] = "https://example.invalid/sig.png"
+    raw["events"][0]["address"] = {"city": "Test city"}
+    raw["events"][0]["comment"] = "Leave at door"
+    raw["events"][0]["image_url"] = "https://example.invalid/photo.jpg"
     result = normalize_parcel(raw)["raw"]
-    assert result == safe_raw_payload(raw)
-    assert "consignee_address" not in result
-    assert "address" not in result["events"][0]
-    assert "comment" not in result["events"][0]
+    assert result["consignee_address"] == {"address_line_1": "Test street"}
+    assert result["events"][0]["address"] == {"city": "Test city"}
+    assert result["events"][0]["comment"] == "Leave at door"
+    assert result["events"][0]["web_description_en"] == "Out for delivery"
+    assert "signature_url" not in result
+    assert "image_url" not in result["events"][0]
+    assert raw["signature_url"] and raw["events"][0]["image_url"]
 
 
 def test_normalize_falls_back_to_status_code_without_text():

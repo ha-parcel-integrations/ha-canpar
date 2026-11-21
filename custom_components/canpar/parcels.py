@@ -15,11 +15,13 @@ and should be left alone.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from collections.abc import Iterable
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DELIVERED_FILTER_AMOUNT,
@@ -88,7 +90,7 @@ _warned: set[str] = set()
 # record bookkeeping (internal ids and audit timestamps) — confirmed present,
 # never useful to a HA user, so just known-and-ignored.
 # ``residential`` is a genuine non-PII signal (unlike the surrounding address
-# fields, which stay redacted); it is surfaced in :func:`safe_raw_payload`.
+# fields, which stay redacted); it is read from the event address.
 _KNOWN_ADDRESS_KEYS = frozenset(
     {
         "name",
@@ -300,69 +302,46 @@ def to_iso_timestamp(value: Any) -> str | None:
 
 
 def canpar_local_timestamp(value: Any) -> str | None:
-    """Format Canpar's offset-less event clock without inventing a timezone."""
+    """Format Canpar's offset-less event clock as ISO with an offset.
+
+    No field says which Canadian zone an event is in, so the wall time is read
+    in Home Assistant's zone.
+    """
     if not isinstance(value, str):
         return None
     try:
-        return datetime.strptime(value, "%Y%m%d %H%M%S").isoformat()
+        parsed = datetime.strptime(value, "%Y%m%d %H%M%S")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=dt_util.get_default_time_zone()).isoformat()
+
+
+def canpar_eta_date(value: Any) -> str | None:
+    """Return Canpar's date-only ETA as an ISO date, or ``None``."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value, "%Y%m%d").date().isoformat()
     except ValueError:
         return None
 
 
-def canpar_delivery_window(value: Any) -> tuple[str | None, str | None]:
-    """Expand Canpar's date-only ETA to its local calendar-day bounds."""
-    if not isinstance(value, str):
-        return None, None
-    try:
-        date = datetime.strptime(value, "%Y%m%d").date().isoformat()
-    except ValueError:
-        return None, None
-    return f"{date}T00:00:00", f"{date}T23:59:59"
+# Links that open a signature or delivery photo; the one thing ``raw`` omits.
+_RAW_OMITTED_RESULT_KEYS = frozenset({"signature_url", "signature"})
+_RAW_OMITTED_EVENT_KEYS = frozenset({"image_url", "signature_url", "signature"})
 
 
 def safe_raw_payload(raw: dict) -> dict:
-    """Return carrier metadata safe to expose in Home Assistant attributes.
-
-    Canpar's response includes recipient addresses, contact data, signatures
-    and tracking URLs. ``raw`` is an entity attribute, not a private cache, so
-    retain only status and timing metadata needed for debugging.
-    """
-    safe_events = []
-    for event in raw.get("events") or []:
-        if not isinstance(event, dict):
-            continue
-        safe_event = {
-            key: event[key]
-            for key in (
-                "code",
-                "code_description_en",
-                "code_description_fr",
-                "local_date_time",
-                "time_shift",
-            )
-            if key in event
-        }
-        # ``residential`` is the one events[].address field that is not PII —
-        # everything else there (name, street, contact info) stays redacted.
-        address = event.get("address")
-        if isinstance(address, dict) and "residential" in address:
-            safe_event["residential"] = address["residential"]
-        safe_events.append(safe_event)
-    return {
-        key: raw[key]
-        for key in (
-            "status",
-            "status_description_en",
-            "status_description_fr",
-            "delivered",
-            "shipping_date",
-            "estimated_delivery_date",
-            "pd_flag",
-            "pd_flag_desc_en",
-            "pd_flag_desc_fr",
-        )
-        if key in raw
-    } | {"events": safe_events}
+    """Return the full carrier record minus signature and image links."""
+    result = {k: v for k, v in raw.items() if k not in _RAW_OMITTED_RESULT_KEYS}
+    if isinstance(raw.get("events"), list):
+        result["events"] = [
+            {k: v for k, v in event.items() if k not in _RAW_OMITTED_EVENT_KEYS}
+            if isinstance(event, dict)
+            else event
+            for event in raw["events"]
+        ]
+    return result
 
 
 def format_dimensions(
@@ -396,8 +375,8 @@ def build_history(
     its event code when the API has no human-readable text. Sorted oldest →
     newest and capped to the most recent ``max_events``.
 
-    Canpar provides offset-less local wall times. Preserve them as naive ISO
-    strings rather than inventing a timezone; source events are newest-first.
+    Canpar provides offset-less local wall times; they are read in Home
+    Assistant's zone. Source events are newest-first.
     """
     entries: list[dict] = []
     for event in events or []:
@@ -424,6 +403,108 @@ def tracking_url(tracking_code: str | None) -> str | None:
     return None
 
 
+def _moment(value: Any, zone: tzinfo) -> tuple[datetime, bool, str] | None:
+    """Return ``(aware datetime, date_only, text)`` for a carrier time, or ``None``.
+
+    A naive time or a bare date gets ``zone``; an aware time keeps its offset
+    and, when it came in as a string, its own spelling.
+    """
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        moment = datetime.combine(value, time.min, tzinfo=zone)
+        return moment, True, moment.isoformat()
+    elif isinstance(value, str) and value:
+        try:
+            if len(value) == 10:
+                moment = datetime.combine(
+                    date.fromisoformat(value), time.min, tzinfo=zone
+                )
+                return moment, True, moment.isoformat()
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        if parsed.tzinfo:
+            return parsed, False, value
+    else:
+        return None
+    moment = parsed if parsed.tzinfo else parsed.replace(tzinfo=zone)
+    return moment, False, moment.isoformat()
+
+
+def _end_of_day(moment: datetime, zone: tzinfo) -> datetime:
+    local = moment.astimezone(zone)
+    return datetime.combine(local.date(), time(23, 59, 59), tzinfo=zone)
+
+
+def planned_window(
+    start: Any, end: Any, *, zone: tzinfo
+) -> tuple[str | None, str | None]:
+    """Return ``(planned_from, planned_to)`` in the canonical window shape.
+
+    ``start`` and ``end`` are ISO strings, dates or datetimes, or ``None``; an
+    epoch number must be converted first (see ``to_iso_timestamp``). A window
+    keeps both ends. One moment with a time ends at ``23:59:59`` the same local
+    day; a date covers ``00:00:00`` to ``23:59:59``; two dates run from the
+    first day's start to the last day's end. Equal values are one moment,
+    reversed values are swapped, and ``planned_to`` is never set without
+    ``planned_from``. ``zone`` is the carrier's own zone: it dates naive times
+    and bare dates and decides which day a moment ends on, so a ``Z`` moment
+    still ends on the carrier's local day. When nothing is left of that day
+    after the moment, there is no ``planned_to``.
+    """
+    first = _moment(start, zone)
+    last = _moment(end, zone)
+    if first is None:
+        first, last = last, None
+    if first is None:
+        return None, None
+
+    def closing(moment: tuple[datetime, bool, str]) -> datetime:
+        return _end_of_day(moment[0], zone) if moment[1] else moment[0]
+
+    if last is not None and closing(last) < first[0]:
+        first, last = last, first
+    if last is not None and closing(last) == first[0]:
+        last = None
+
+    if last is None:
+        end_of_day = _end_of_day(first[0], zone)
+        return first[2], end_of_day.isoformat() if end_of_day > first[0] else None
+    return first[2], closing(last).isoformat() if last[1] else last[2]
+
+
+_NO_WINDOW_STATUSES = frozenset(
+    {ParcelStatus.AT_PICKUP_POINT, ParcelStatus.RETURNING, ParcelStatus.DELIVERED}
+)
+
+
+def planned_for_status(
+    status: ParcelStatus, planned_from: str | None, planned_to: str | None
+) -> tuple[str | None, str | None]:
+    """Empty the delivery window once the parcel is at its destination or done."""
+    if status in _NO_WINDOW_STATUSES:
+        return None, None
+    return planned_from, planned_to
+
+
+def is_pickup(
+    route_flag: bool | None,
+    status: ParcelStatus,
+    event_statuses: Iterable[ParcelStatus | None] = (),
+) -> bool:
+    """Whether the delivery route ends at a pickup point.
+
+    The carrier's own route flag wins; otherwise the parcel having reached
+    ``AT_PICKUP_POINT`` at any point counts, so the value survives collection.
+    """
+    if route_flag:
+        return True
+    return status is ParcelStatus.AT_PICKUP_POINT or any(
+        event is ParcelStatus.AT_PICKUP_POINT for event in event_statuses
+    )
+
+
 def normalize_parcel(raw: dict, *, include_history: bool = False) -> dict:
     """Return a carrier-agnostic parcel dict with the payload under ``raw``.
 
@@ -435,10 +516,10 @@ def normalize_parcel(raw: dict, *, include_history: bool = False) -> dict:
     Rules worth keeping when you rewrite the body:
 
     * ``status`` is canonical, ``raw_status`` is the carrier's own text.
-    * A delivered parcel has ``delivered_at`` set and ``planned_from`` /
-      ``planned_to`` cleared — the ETA is meaningless once it has arrived.
-    * ``planned_to`` is ``None`` for a point estimate; only fill it when the
-      carrier genuinely reports a *window*.
+    * ``delivered`` is ``status is DELIVERED``; ``delivered_at`` only then.
+    * ``planned_from`` / ``planned_to`` come from :func:`planned_window` and are
+      emptied by :func:`planned_for_status`.
+    * ``pickup`` comes from :func:`is_pickup` and stays ``True`` after collection.
     * ``weight`` is kilograms, ``dimensions`` centimetres (see
       :func:`format_dimensions`).
     * ``history`` is ``None`` when the option is off — the key still exists.
@@ -464,30 +545,28 @@ def normalize_parcel(raw: dict, *, include_history: bool = False) -> dict:
         status is ParcelStatus.DELIVERED
     ):
         _warn_delivered_mismatch(raw_delivered, status)
-    delivered = raw_delivered is True and status is ParcelStatus.DELIVERED
-    address = newest_event.get("address") or {}
-    pickup_point = None
-    if status is ParcelStatus.AT_PICKUP_POINT:
-        pickup_point = (
-            ", ".join(
-                str(value)
-                for value in (address.get("city"), address.get("province"))
-                if value
-            )
-            or None
-        )
-
+    delivered = status is ParcelStatus.DELIVERED
     delivered_at = (
         canpar_local_timestamp(newest_event.get("local_date_time"))
         if delivered
         else None
     )
-    # A returned parcel is no longer expected at the recipient, so its ETA must
-    # not keep a "delivery" on the calendar and in the next-delivery sensor.
-    planned_from, planned_to = (
-        (None, None)
-        if delivered or status is ParcelStatus.RETURNING
-        else canpar_delivery_window(raw.get("estimated_delivery_date"))
+    planned_from, planned_to = planned_for_status(
+        status,
+        *planned_window(
+            canpar_eta_date(raw.get("estimated_delivery_date")),
+            None,
+            zone=dt_util.get_default_time_zone(),
+        ),
+    )
+    pickup = is_pickup(
+        None,
+        status,
+        (
+            map_event_status(event.get("code"))
+            for event in events
+            if isinstance(event, dict)
+        ),
     )
 
     return {
@@ -501,8 +580,8 @@ def normalize_parcel(raw: dict, *, include_history: bool = False) -> dict:
         "delivered_at": delivered_at,
         "planned_from": planned_from,
         "planned_to": planned_to,
-        "pickup": status is ParcelStatus.AT_PICKUP_POINT,
-        "pickup_point": pickup_point,
+        "pickup": pickup,
+        "pickup_point": None,
         "url": tracking_url(tracking_code),
         "weight": None,
         "dimensions": None,
