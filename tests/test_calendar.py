@@ -49,6 +49,16 @@ def test_event_returns_earliest_upcoming():
     assert event.summary == "Example Sender"
 
 
+def test_event_title_prefers_contents_then_sender_then_the_fallback():
+    parcel = _parcel("A", planned_from="2099-01-01T10:00:00Z")
+    assert _cal([parcel]).event.summary == "Example Sender"
+    parcel["contents"] = "Running shoes"
+    assert _cal([parcel]).event.summary == "Running shoes"
+    parcel["contents"] = None
+    parcel["sender"] = None
+    assert _cal([parcel]).event.summary == "Parcel A"
+
+
 def test_event_none_when_no_planned():
     assert _cal([_parcel("A")]).event is None
 
